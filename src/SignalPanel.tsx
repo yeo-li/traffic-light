@@ -63,9 +63,11 @@ interface SignalPanelProps {
   error: string | null;
   onRefresh: () => void;
   hasSelection: boolean;
+  isCollapsed: boolean;
+  onCollapse: () => void;
 }
 
-export function SignalPanel({ intersectionName, data, isLoading, isTransitionPending, hasTimingResolutionFailed, error, onRefresh, hasSelection }: SignalPanelProps) {
+export function SignalPanel({ intersectionName, data, isLoading, isTransitionPending, hasTimingResolutionFailed, error, onRefresh, hasSelection, isCollapsed, onCollapse }: SignalPanelProps) {
   const statusText = !hasSelection
     ? "지도에서 신호등을 선택하면 실시간 보행 신호를 확인합니다."
     : isLoading
@@ -80,6 +82,8 @@ export function SignalPanel({ intersectionName, data, isLoading, isTransitionPen
         ? "현재 제공되는 보행 신호정보가 없습니다."
         : null;
 
+  if (isCollapsed) return null;
+
   return (
     <section className="bottom-sheet" aria-live="polite" aria-label={`${intersectionName} 신호 정보`}>
       <div className="sheet-handle" aria-hidden="true" />
@@ -88,9 +92,14 @@ export function SignalPanel({ intersectionName, data, isLoading, isTransitionPen
           <p className="eyebrow">선택한 교차로</p>
           <h1>{intersectionName}</h1>
         </div>
-        <button className="refresh-button" type="button" onClick={onRefresh} disabled={isLoading || !hasSelection}>
-          <span aria-hidden="true">↻</span> {isLoading ? "조회 중" : "새로고침"}
-        </button>
+        <div className="panel-actions">
+          <button className="refresh-button" type="button" onClick={onRefresh} disabled={isLoading || !hasSelection}>
+            <span aria-hidden="true">↻</span> {isLoading ? "조회 중" : "새로고침"}
+          </button>
+          <button className="collapse-panel-button" type="button" onClick={onCollapse} aria-label="신호 정보 패널 내리기">
+            <span aria-hidden="true">⌄</span> 지도 보기
+          </button>
+        </div>
       </div>
 
       <h2>보행 신호</h2>

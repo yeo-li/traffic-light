@@ -37,6 +37,7 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [isTransitionPending, setIsTransitionPending] = useState(false);
   const [hasTimingResolutionFailed, setHasTimingResolutionFailed] = useState(false);
+  const [isSignalPanelCollapsed, setIsSignalPanelCollapsed] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const mapAbortRef = useRef<AbortController | null>(null);
   const unusableTimingRetriesRef = useRef(0);
@@ -68,6 +69,7 @@ export function App() {
 
   // Keep this stable so refreshing signal data never recreates the map instance.
   const openSignalPanel = useCallback((intersection: Intersection) => {
+    setIsSignalPanelCollapsed(false);
     if (intersection.id !== selectedIntersection?.id) {
       abortRef.current?.abort();
       abortRef.current = null;
@@ -169,7 +171,7 @@ export function App() {
   }, [isLoading, refresh, signalData]);
 
   return (
-    <main className="app-shell">
+    <main className={`app-shell ${isSignalPanelCollapsed ? "panel-collapsed" : ""}`}>
       <header className="top-bar">
         <span aria-hidden="true">🚦</span><strong>건널까?</strong>
         <label className="region-select"><span className="sr-only">지도 지역</span><select value={regionId} onChange={(event) => setRegionId(event.target.value as RegionId)}>{regions.map((region) => <option key={region.id} value={region.id}>{region.name}</option>)}</select></label>
@@ -195,6 +197,8 @@ export function App() {
         error={error}
         onRefresh={manualRefresh}
         hasSelection={selectedIntersection !== null}
+        isCollapsed={isSignalPanelCollapsed}
+        onCollapse={() => setIsSignalPanelCollapsed(true)}
       />
     </main>
   );
