@@ -69,9 +69,16 @@ export async function GET(request: Request): Promise<Response> {
   upstreamUrl.searchParams.set("itstId", intersectionId);
   let upstream: Response;
   try { upstream = await fetch(upstreamUrl.toString()); }
-  catch { return apiError("UPSTREAM_ERROR", "실시간 신호정보를 불러오지 못했습니다.", 502); }
+  catch (error) {
+    // Do not include the upstream URL here: it contains the private API key.
+    console.error("T-Data signal request failed", { intersectionId, reason: error instanceof Error ? error.name : "unknown" });
+    return apiError("UPSTREAM_ERROR", "실시간 신호 API에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요.", 502);
+  }
   if (upstream.status === 429) return apiError("RATE_LIMITED", "요청이 많습니다. 잠시 후 다시 시도해 주세요.", 429, Number(upstream.headers.get("retry-after")) || undefined);
-  if (!upstream.ok) return apiError("UPSTREAM_ERROR", "실시간 신호정보를 불러오지 못했습니다.", 502);
+  if (!upstream.ok) {
+    console.error("T-Data signal API returned an error", { intersectionId, upstreamStatus: upstream.status });
+    return apiError("UPSTREAM_ERROR", "실시간 신호 API가 응답하지 않았습니다. 잠시 후 다시 시도해 주세요.", 502);
+  }
   const payload: unknown = await upstream.json().catch(() => null);
   if (!payload) return apiError("UPSTREAM_ERROR", "실시간 신호 응답을 해석하지 못했습니다.", 502);
   const record = findSignalRecord(payload);
