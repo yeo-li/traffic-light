@@ -12,6 +12,17 @@ function getMapSignalState(data: SignalResponse | null, isTransitionPending: boo
   return "UNKNOWN";
 }
 
+function distanceTo(location: MapLocation, intersection: Intersection): number {
+  const toRadians = (degrees: number) => degrees * Math.PI / 180;
+  const latitudeDelta = toRadians(intersection.latitude - location.latitude);
+  const longitudeDelta = toRadians(intersection.longitude - location.longitude);
+  const startLatitude = toRadians(location.latitude);
+  const endLatitude = toRadians(intersection.latitude);
+  const haversine = Math.sin(latitudeDelta / 2) ** 2
+    + Math.cos(startLatitude) * Math.cos(endLatitude) * Math.sin(longitudeDelta / 2) ** 2;
+  return 6_371_000 * 2 * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
+}
+
 function toUserMessage(error: unknown): string {
   if (error instanceof SignalApiError) {
     if (error.status === 429) {
@@ -39,6 +50,7 @@ export function App() {
   const abortRef = useRef<AbortController | null>(null);
   const mapAbortRef = useRef<AbortController | null>(null);
   const unusableTimingRetriesRef = useRef(0);
+  const hasAutoSelectedNearestRef = useRef(false);
 
   const refresh = useCallback(async () => {
     if (!selectedIntersection) return;
@@ -120,6 +132,16 @@ export function App() {
   useEffect(() => {
     requestUserLocation();
   }, [requestUserLocation]);
+
+  useEffect(() => {
+    // Select once only: later location updates must not override a pin the user chose.
+    if (hasAutoSelectedNearestRef.current || selectedIntersection || !userLocation || intersections.length === 0) return;
+    const nearest = intersections.reduce((closest, intersection) => (
+      distanceTo(userLocation, intersection) < distanceTo(userLocation, closest) ? intersection : closest
+    ));
+    hasAutoSelectedNearestRef.current = true;
+    openSignalPanel(nearest);
+  }, [intersections, openSignalPanel, selectedIntersection, userLocation]);
 
   useEffect(() => {
     if (!signalData || isLoading || signalData.signals.length === 0) return;
