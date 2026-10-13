@@ -6,7 +6,6 @@ button { font: inherit; }
 .top-bar { z-index: 10; display: flex; align-items: center; gap: 8px; padding: 0 max(20px, env(safe-area-inset-left)); color: #f8fbf8; background: #0c2d21; box-shadow: 0 2px 12px #001c1126; }
 .top-bar strong { font-size: 1.08rem; letter-spacing: -0.03em; }
 .top-bar p { margin: 0 0 0 auto; font-size: .76rem; color: #b8d3c3; }
-.region-select select { min-height: 30px; padding: 0 7px; color: #ecf8ef; font: inherit; font-size: .79rem; font-weight: 700; background: #174735; border: 1px solid #5d8a72; border-radius: 7px; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 .map-load-error { position: absolute; z-index: 4; top: 70px; left: 16px; right: 16px; margin: 0; padding: 10px 12px; color: #902d2b; font-size: .84rem; background: #fff3f2; border-radius: 10px; box-shadow: 0 2px 8px #001a0f1c; }
 .map-area { position: relative; min-height: 380px; background: #dce8df; z-index: 0; }

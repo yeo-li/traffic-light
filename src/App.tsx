@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { fetchIntersections, fetchSignals, SignalApiError } from "./api";
-import { regionById, regions, type RegionId } from "./data/regions";
 import { GoogleMap } from "./GoogleMap";
 import { SignalPanel } from "./SignalPanel";
 import type { Intersection, MapLocation, SignalResponse, SignalState } from "./types";
@@ -29,7 +28,6 @@ function toUserMessage(error: unknown): string {
 export function App() {
   const [selectedIntersection, setSelectedIntersection] = useState<Intersection | null>(null);
   const [intersections, setIntersections] = useState<readonly Intersection[]>([]);
-  const [regionId, setRegionId] = useState<RegionId>("seoul");
   const [mapError, setMapError] = useState<string | null>(null);
   const [userLocation, setUserLocation] = useState<MapLocation | null>(null);
   const [signalData, setSignalData] = useState<SignalResponse | null>(null);
@@ -111,13 +109,13 @@ export function App() {
     setSelectedIntersection(null);
     setSignalData(null);
     setError(null);
-    void fetchIntersections(regionById(regionId).standardRegionCode, controller.signal)
+    void fetchIntersections("1100000000", controller.signal)
       .then((items) => setIntersections(items))
       .catch((caught) => {
         if (!(caught instanceof DOMException && caught.name === "AbortError")) setMapError(toUserMessage(caught));
       });
     return () => controller.abort();
-  }, [regionId]);
+  }, []);
 
   useEffect(() => {
     requestUserLocation();
@@ -174,7 +172,6 @@ export function App() {
     <main className={`app-shell ${isSignalPanelCollapsed ? "panel-collapsed" : ""}`}>
       <header className="top-bar">
         <span aria-hidden="true">🚦</span><strong>건널까?</strong>
-        <label className="region-select"><span className="sr-only">지도 지역</span><select value={regionId} onChange={(event) => setRegionId(event.target.value as RegionId)}>{regions.map((region) => <option key={region.id} value={region.id}>{region.name}</option>)}</select></label>
         <p>보행 신호 참고 정보</p>
       </header>
       <GoogleMap
