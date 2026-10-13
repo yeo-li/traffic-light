@@ -19,7 +19,7 @@ interface GoogleMaps {
   LatLng: new (latitude: number, longitude: number) => unknown;
   Point: new (x: number, y: number) => unknown;
   Size: new (width: number, height: number) => unknown;
-  Map: new (container: HTMLElement, options: { center: { lat: number; lng: number }; zoom: number; mapTypeControl: boolean; streetViewControl: boolean; fullscreenControl: boolean; gestureHandling: "greedy"; scrollwheel: boolean }) => GoogleMapInstance;
+  Map: new (container: HTMLElement, options: { center: { lat: number; lng: number }; zoom: number; mapTypeControl: boolean; streetViewControl: boolean; fullscreenControl: boolean; zoomControl: boolean; rotateControl: boolean; scaleControl: boolean; cameraControl: boolean; gestureHandling: "greedy"; scrollwheel: boolean }) => GoogleMapInstance;
   Marker: new (options: { position: { lat: number; lng: number }; map: GoogleMapInstance; title: string; icon: MarkerIcon }) => GoogleMarker;
   event: { addListener: (target: unknown, event: string, handler: () => void) => void };
 }
@@ -338,6 +338,10 @@ export function GoogleMap({ intersections, selectedIntersection, selectedSignals
         mapTypeControl: true,
         streetViewControl: false,
         fullscreenControl: false,
+        zoomControl: false,
+        rotateControl: false,
+        scaleControl: false,
+        cameraControl: false,
         gestureHandling: "greedy",
         scrollwheel: true,
       });
