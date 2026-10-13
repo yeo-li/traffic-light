@@ -1,0 +1,4 @@
+# Copy this file to .dev.vars and replace each placeholder with the corresponding key.
+# It is ignored by git and is available only to Cloudflare Pages Functions.
+NATIONAL_RTI_SERVICE_KEY="your_data_go_kr_service_key"
+T_DATA_API_KEY="your_t_data_api_key"

@@ -1,0 +1,6 @@
+name = "traffic-right"
+pages_build_output_dir = "dist"
+compatibility_date = "2026-10-13"
+
+# Set the secret before deploying. Never put a real key in this file.
+# npx wrangler pages secret put T_DATA_API_KEY
