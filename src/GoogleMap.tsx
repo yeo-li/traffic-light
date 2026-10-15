@@ -433,15 +433,20 @@ export function GoogleMap({ intersections, selectedIntersection, selectedSignals
 
 function LiveDirectionalityPanel({ intersectionName, signals }: { intersectionName: string; signals: readonly PedestrianSignal[] }) {
   const timedSignals = signals.filter((signal) => signal.remainingSeconds !== null);
-  const nextRemaining = timedSignals.reduce<number | null>((earliest, signal) => (
-    earliest === null || (signal.remainingSeconds ?? Infinity) < earliest ? signal.remainingSeconds : earliest
-  ), null);
-  // The first residual timer to end is the next phase change observed from the API.
-  const nextDirections = new Set(timedSignals
-    .filter((signal) => nextRemaining !== null && Math.abs((signal.remainingSeconds ?? 0) - nextRemaining) < 0.2)
-    .map((signal) => signal.direction));
+  const transitionSteps = timedSignals
+    .slice()
+    .sort((left, right) => (left.remainingSeconds ?? Infinity) - (right.remainingSeconds ?? Infinity))
+    .reduce<{ remainingSeconds: number; signals: PedestrianSignal[] }[]>((steps, signal) => {
+      const remainingSeconds = signal.remainingSeconds ?? 0;
+      const previous = steps.at(-1);
+      if (previous && Math.abs(previous.remainingSeconds - remainingSeconds) < 0.2) previous.signals.push(signal);
+      else steps.push({ remainingSeconds, signals: [signal] });
+      return steps;
+    }, [])
+    .slice(0, 4);
   const activeDirections = signals.filter((signal) => signal.state === "WALK");
   const hasFourOrMoreDirections = signals.length >= 4;
+  const nextStateLabel = (state: SignalState) => state === "WALK" ? "정지" : state === "STOP" ? "진행" : "변경";
 
   return (
     <aside className="live-direction-panel" aria-label={`${intersectionName} 신호 순서`}>
@@ -457,19 +462,19 @@ function LiveDirectionalityPanel({ intersectionName, signals }: { intersectionNa
       <div className="live-direction-diagram" aria-label="방향별 신호 상태">
         <i className="live-road vertical" /><i className="live-road horizontal" />
         {signals.map((signal) => {
-          const isNext = nextDirections.has(signal.direction);
-          return <span key={signal.direction} className={`live-direction-node ${signal.direction.toLowerCase()} ${signal.state.toLowerCase()} ${isNext ? "next" : ""}`}>
-            <b>{directionName[signal.direction]}</b><small>{isNext ? "다음 전환" : signalDescription[signal.state]}</small>
+          return <span key={signal.direction} className={`live-direction-node ${signal.direction.toLowerCase()} ${signal.state.toLowerCase()}`}>
+            <b>{directionName[signal.direction]}</b><small>{signalDescription[signal.state]}</small>
           </span>;
         })}
         <span className="live-direction-core">보행<br />신호</span>
       </div>
-      <p className="live-direction-next">
-        {nextDirections.size > 0
-          ? <>다음 전환 <strong>{[...nextDirections].map((direction) => directionName[direction]).join(" · ")}</strong>{nextRemaining === null ? "" : ` · 약 ${nextRemaining.toFixed(1)}초`}</>
-          : "다음 전환 시각 정보가 없습니다."}
-      </p>
-      <p className="live-direction-note">초록은 현재 진행, 노랑 테두리는 API 잔여시간상 가장 먼저 바뀔 방향입니다.</p>
+      {transitionSteps.length > 0 ? <div className="signal-order-flow" aria-label="예상 신호 전환 순서">
+        <span className="signal-order-current"><small>현재</small><b>{activeDirections.length > 0 ? activeDirections.map((signal) => directionName[signal.direction]).join(" · ") : "전체 대기"}</b></span>
+        {transitionSteps.map((step) => <span className="signal-order-step" key={step.remainingSeconds}>
+          <i aria-hidden="true">→</i><span><small>+{step.remainingSeconds.toFixed(1)}초</small><b>{step.signals.map((signal) => `${directionName[signal.direction]} ${nextStateLabel(signal.state)}`).join(" · ")}</b></span>
+        </span>)}
+      </div> : <p className="live-direction-next">신호 순서를 계산할 잔여시간 정보가 없습니다.</p>}
+      <p className="live-direction-note">화살표는 방향별 잔여시간을 시간순으로 정렬한 예상 전환 흐름입니다.</p>
     </aside>
   );
 }
