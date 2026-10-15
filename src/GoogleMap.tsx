@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { Intersection, MapLocation, PedestrianSignal, SignalDirection, SignalState } from "./types";
 
 type MarkerIcon = { url: string; anchor?: unknown; scaledSize?: unknown };
+type JunctionShape = "crossroads" | "three-way";
 interface GoogleMarker {
   setIcon: (icon: MarkerIcon) => void;
   setTitle: (title: string) => void;
@@ -67,6 +68,21 @@ const signalDescription: Record<SignalState, string> = {
 const directionName: Record<SignalDirection, string> = {
   N: "북쪽", NE: "북동쪽", E: "동쪽", SE: "남동쪽",
   S: "남쪽", SW: "남서쪽", W: "서쪽", NW: "북서쪽",
+};
+
+const gunjaStation = { lat: 37.5571793, lng: 127.0794927 };
+
+const directionTestPhases: Record<JunctionShape, readonly { label: string; description: string; activeArms: readonly string[] }[]> = {
+  crossroads: [
+    { label: "① 북 ↕ 남", description: "남북으로 횡단하는 보행 신호 묶음", activeArms: ["north", "south"] },
+    { label: "② 동 ↔ 서", description: "동서로 횡단하는 보행 신호 묶음", activeArms: ["east", "west"] },
+    { label: "③ 전체 정지", description: "모든 횡단 방향 대기", activeArms: [] },
+  ],
+  "three-way": [
+    { label: "① 북 ↔ 남서", description: "북쪽과 남서쪽을 연결하는 보행 신호 묶음", activeArms: ["north", "southwest"] },
+    { label: "② 북 ↔ 남동", description: "북쪽과 남동쪽을 연결하는 보행 신호 묶음", activeArms: ["north", "southeast"] },
+    { label: "③ 전체 정지", description: "모든 횡단 방향 대기", activeArms: [] },
+  ],
 };
 
 // The source provides a direction but not the exact crosswalk geometry. Keep directional
@@ -150,6 +166,9 @@ export function GoogleMap({ intersections, selectedIntersection, selectedSignals
   const [error, setError] = useState<string | null>(null);
   const [isMapReady, setIsMapReady] = useState(false);
   const [selectedDirection, setSelectedDirection] = useState<SignalDirection | null>(null);
+  const [isDirectionTestOpen, setIsDirectionTestOpen] = useState(false);
+  const [junctionShape, setJunctionShape] = useState<JunctionShape>("crossroads");
+  const [testPhaseIndex, setTestPhaseIndex] = useState(0);
   const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
 
   const focusCurrentLocation = () => {
@@ -159,6 +178,22 @@ export function GoogleMap({ intersections, selectedIntersection, selectedSignals
       mapRef.current.setZoom(16);
     }
     onLocate();
+  };
+
+  const toggleDirectionTest = () => {
+    setIsDirectionTestOpen((isOpen) => {
+      const nextOpen = !isOpen;
+      if (nextOpen && mapRef.current) {
+        hasUserInteractedRef.current = true;
+        mapRef.current.panTo(gunjaStation);
+        mapRef.current.setZoom(18);
+      }
+      return nextOpen;
+    });
+  };
+  const chooseJunctionShape = (shape: JunctionShape) => {
+    setJunctionShape(shape);
+    setTestPhaseIndex(0);
   };
 
   useEffect(() => { onMarkerClickRef.current = onMarkerClick; }, [onMarkerClick]);
@@ -383,10 +418,48 @@ export function GoogleMap({ intersections, selectedIntersection, selectedSignals
   return (
     <section className="map-area" aria-label="서울 보행 신호 교차로 구글 지도">
       <div ref={containerRef} className="map" />
+      <button type="button" className="direction-test-toggle" onClick={toggleDirectionTest} aria-expanded={isDirectionTestOpen}>
+        <span aria-hidden="true">⌘</span> 방향성 테스트
+      </button>
+      {isDirectionTestOpen ? <DirectionalityTest shape={junctionShape} phaseIndex={testPhaseIndex} onShapeChange={chooseJunctionShape} onPhaseChange={setTestPhaseIndex} /> : null}
       <button type="button" className="current-location-button" onClick={focusCurrentLocation} aria-label="현재 위치로 지도 이동">
         <span aria-hidden="true">◎</span> 현재 위치
       </button>
       {error ? <div className="map-error"><strong>구글 지도를 표시할 수 없습니다.</strong><span>{error}</span><code>VITE_GOOGLE_MAPS_API_KEY</code>를 설정한 뒤 서버를 다시 시작하세요.</div> : null}
     </section>
+  );
+}
+
+function DirectionalityTest({ shape, phaseIndex, onShapeChange, onPhaseChange }: {
+  shape: JunctionShape;
+  phaseIndex: number;
+  onShapeChange: (shape: JunctionShape) => void;
+  onPhaseChange: (index: number) => void;
+}) {
+  const phases = directionTestPhases[shape];
+  const phase = phases[phaseIndex] ?? phases[0];
+  const isActive = (arm: string) => phase.activeArms.includes(arm);
+  const arm = (name: string, label: string) => <span className={`junction-arm ${name} ${isActive(name) ? "active" : ""}`}><b>{label}</b><small>{isActive(name) ? "진행" : "대기"}</small></span>;
+  return (
+    <aside className="direction-test-panel" aria-label="군자역 방향성 테스트">
+      <div className="direction-test-heading">
+        <div><p>군자역 인근</p><strong>횡단 방향성 실험</strong></div>
+        <span>TEST</span>
+      </div>
+      <p className="direction-test-caption">신호 API 없이, 교차로 구조와 신호 단계의 연결 방식을 검토합니다.</p>
+      <div className="junction-tabs" role="tablist" aria-label="교차로 형태">
+        <button type="button" className={shape === "crossroads" ? "selected" : ""} onClick={() => onShapeChange("crossroads")}>사거리</button>
+        <button type="button" className={shape === "three-way" ? "selected" : ""} onClick={() => onShapeChange("three-way")}>삼거리</button>
+      </div>
+      <div className={`junction-diagram ${shape}`} aria-label={`${shape === "crossroads" ? "사거리" : "삼거리"} ${phase.label}`}>
+        {shape === "crossroads" ? <><i className="road vertical" /><i className="road horizontal" />{arm("north", "북")}{arm("east", "동")}{arm("south", "남")}{arm("west", "서")}</> : <><i className="road stem" /><i className="road branch-left" /><i className="road branch-right" />{arm("north", "북")}{arm("southwest", "남서")}{arm("southeast", "남동")}</>}
+        <span className="junction-core">보행<br />신호</span>
+      </div>
+      <div className="phase-picker" aria-label="신호 단계 선택">
+        {phases.map((item, index) => <button key={item.label} type="button" className={index === phaseIndex ? "selected" : ""} onClick={() => onPhaseChange(index)}>{item.label}</button>)}
+      </div>
+      <p className="phase-description"><strong>{phase.label}</strong> {phase.description}</p>
+      <p className="direction-test-note">초록색은 이 단계에 연결된 방향입니다. 실제 횡단보도 배치는 현장·지도 데이터로 확정합니다.</p>
+    </aside>
   );
 }
