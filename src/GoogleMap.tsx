@@ -10,6 +10,10 @@ interface GoogleMarker {
   setVisible: (visible: boolean) => void;
 }
 
+interface GooglePolyline {
+  setMap: (map: GoogleMapInstance | null) => void;
+}
+
 interface GoogleMapInstance {
   panTo: (position: { lat: number; lng: number }) => void;
   setZoom: (zoom: number) => void;
@@ -22,6 +26,8 @@ interface GoogleMaps {
   Size: new (width: number, height: number) => unknown;
   Map: new (container: HTMLElement, options: { center: { lat: number; lng: number }; zoom: number; mapTypeControl: boolean; streetViewControl: boolean; fullscreenControl: boolean; zoomControl: boolean; rotateControl: boolean; scaleControl: boolean; cameraControl: boolean; gestureHandling: "greedy"; scrollwheel: boolean }) => GoogleMapInstance;
   Marker: new (options: { position: { lat: number; lng: number }; map: GoogleMapInstance; title: string; icon: MarkerIcon }) => GoogleMarker;
+  Polyline: new (options: { path: readonly { lat: number; lng: number }[]; map: GoogleMapInstance; strokeColor: string; strokeOpacity: number; strokeWeight: number; icons: readonly { icon: unknown; offset: string }[] }) => GooglePolyline;
+  SymbolPath: { FORWARD_CLOSED_ARROW: unknown };
   event: { addListener: (target: unknown, event: string, handler: () => void) => void };
 }
 
@@ -92,14 +98,73 @@ const directionOffsetMeters: Record<SignalDirection, readonly [north: number, ea
   S: [-20, 0], SW: [-14, -14], W: [0, -20], NW: [14, -14],
 };
 
-function directionalPosition(intersection: Intersection, direction: SignalDirection) {
-  const [north, east] = directionOffsetMeters[direction];
+function offsetPosition(intersection: Intersection, north: number, east: number) {
   const metersPerLatitudeDegree = 111_320;
   const metersPerLongitudeDegree = metersPerLatitudeDegree * Math.cos(intersection.latitude * Math.PI / 180);
   return {
     lat: intersection.latitude + north / metersPerLatitudeDegree,
     lng: intersection.longitude + east / metersPerLongitudeDegree,
   };
+}
+
+function directionalPosition(intersection: Intersection, direction: SignalDirection) {
+  return offsetPosition(intersection, ...directionOffsetMeters[direction]);
+}
+
+interface SignalPhase {
+  signals: PedestrianSignal[];
+  remainingSeconds: number | null;
+}
+
+// The API tells us the active pedestrian direction and each stop direction's remaining time.
+// That is enough to express the observable order (current phase → upcoming walk phases), but
+// not to invent a full repeating cycle beyond the values returned for this moment.
+function buildSignalPhases(signals: readonly PedestrianSignal[]): SignalPhase[] {
+  const phases: SignalPhase[] = [];
+  const activeSignals = signals.filter((signal) => signal.state === "WALK");
+  if (activeSignals.length > 0) phases.push({ signals: [...activeSignals], remainingSeconds: null });
+
+  const upcoming = signals
+    .filter((signal) => signal.state === "STOP" && signal.remainingSeconds !== null)
+    .slice()
+    .sort((left, right) => (left.remainingSeconds ?? Infinity) - (right.remainingSeconds ?? Infinity));
+  for (const signal of upcoming) {
+    const remainingSeconds = signal.remainingSeconds ?? 0;
+    const previous = phases.at(-1);
+    if (previous && previous.remainingSeconds !== null && Math.abs(previous.remainingSeconds - remainingSeconds) < 0.2) {
+      previous.signals.push(signal);
+    } else {
+      phases.push({ signals: [signal], remainingSeconds });
+    }
+  }
+  return phases.slice(0, 4);
+}
+
+function phaseRepresentative(phase: SignalPhase) {
+  return phase.signals[0];
+}
+
+function phaseBadgePosition(intersection: Intersection, direction: SignalDirection) {
+  const [north, east] = directionOffsetMeters[direction];
+  const length = Math.hypot(north, east);
+  return offsetPosition(intersection, north / length * 46, east / length * 46);
+}
+
+function phaseArcPath(intersection: Intersection, from: SignalDirection, to: SignalDirection, arcIndex: number) {
+  const [fromNorth, fromEast] = directionOffsetMeters[from];
+  const [toNorth, toEast] = directionOffsetMeters[to];
+  const fromAngle = Math.atan2(fromEast, fromNorth);
+  const toAngle = Math.atan2(toEast, toNorth);
+  let delta = toAngle - fromAngle;
+  while (delta > Math.PI) delta -= Math.PI * 2;
+  while (delta <= -Math.PI) delta += Math.PI * 2;
+  if (Math.abs(Math.abs(delta) - Math.PI) < 0.01) delta = arcIndex % 2 === 0 ? Math.PI : -Math.PI;
+
+  const ringPoint = (angle: number) => offsetPosition(intersection, Math.cos(angle) * 42, Math.sin(angle) * 42);
+  const points = [directionalPosition(intersection, from), ringPoint(fromAngle)];
+  for (let step = 1; step <= 4; step += 1) points.push(ringPoint(fromAngle + delta * (step / 5)));
+  points.push(ringPoint(toAngle), directionalPosition(intersection, to));
+  return points;
 }
 
 function trafficLightIcon(maps: GoogleMaps, state: SignalState, compact = false, emphasized = false): MarkerIcon {
@@ -148,10 +213,26 @@ function userLocationIcon(): MarkerIcon {
   return { url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}` };
 }
 
+function phaseBadgeIcon(maps: GoogleMaps, order: number): MarkerIcon {
+  const colors = ["#0f766e", "#1769d1", "#7c3aed", "#c2410c"];
+  const color = colors[(order - 1) % colors.length];
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 22 22">
+    <circle cx="11" cy="11" r="9.5" fill="${color}" stroke="#fff" stroke-width="2"/>
+    <text x="11" y="14.5" text-anchor="middle" font-family="Arial,sans-serif" font-size="11" font-weight="800" fill="#fff">${order}</text>
+  </svg>`;
+  return {
+    url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`,
+    anchor: new maps.Point(11, 11),
+    scaledSize: new maps.Size(22, 22),
+  };
+}
+
 export function GoogleMap({ intersections, selectedIntersection, selectedSignals, signalState, userLocation, onMarkerClick, onLocate }: GoogleMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const markersRef = useRef(new Map<string, GoogleMarker>());
   const directionMarkersRef = useRef(new Map<SignalDirection, GoogleMarker>());
+  const phaseMarkersRef = useRef<GoogleMarker[]>([]);
+  const phaseLinesRef = useRef<GooglePolyline[]>([]);
   const clusterMarkersRef = useRef(new Map<string, GoogleMarker>());
   const syncIntersectionMarkersRef = useRef<() => void>(() => undefined);
   const mapRef = useRef<GoogleMapInstance | null>(null);
@@ -290,6 +371,48 @@ export function GoogleMap({ intersections, selectedIntersection, selectedSignals
     }
   }, [isMapReady, selectedDirection, selectedIntersection, selectedSignals]);
 
+  useEffect(() => {
+    const clearPhaseOverlays = () => {
+      for (const line of phaseLinesRef.current) line.setMap(null);
+      for (const marker of phaseMarkersRef.current) marker.setVisible(false);
+      phaseLinesRef.current = [];
+      phaseMarkersRef.current = [];
+    };
+
+    clearPhaseOverlays();
+    const map = mapRef.current;
+    const maps = mapsRef.current;
+    if (!map || !maps || isDirectionTestOpen || !selectedIntersection || selectedSignals.length < 3) return;
+
+    const phases = buildSignalPhases(selectedSignals);
+    if (phases.length < 2) return;
+
+    phases.forEach((phase, index) => {
+      for (const signal of phase.signals) {
+        phaseMarkersRef.current.push(new maps.Marker({
+          position: phaseBadgePosition(selectedIntersection, signal.direction),
+          map,
+          title: `${index + 1}단계: ${directionName[signal.direction]}${phase.remainingSeconds === null ? " 현재 진행" : ` 약 ${phase.remainingSeconds.toFixed(1)}초 후 진행`}`,
+          icon: phaseBadgeIcon(maps, index + 1),
+        }));
+      }
+      const nextPhase = phases[index + 1];
+      if (!nextPhase) return;
+      const from = phaseRepresentative(phase);
+      const to = phaseRepresentative(nextPhase);
+      phaseLinesRef.current.push(new maps.Polyline({
+        path: phaseArcPath(selectedIntersection, from.direction, to.direction, index),
+        map,
+        strokeColor: "#1769d1",
+        strokeOpacity: 0.85,
+        strokeWeight: 4,
+        icons: [{ icon: { path: maps.SymbolPath.FORWARD_CLOSED_ARROW, scale: 3.5, strokeColor: "#1769d1", fillColor: "#1769d1", fillOpacity: 1 }, offset: "66%" }],
+      }));
+    });
+
+    return clearPhaseOverlays;
+  }, [isDirectionTestOpen, isMapReady, selectedIntersection, selectedSignals]);
+
   // Google Maps does not provide clustering for legacy Marker instances by default.
   // This lightweight grid clusters nearby intersections only while zoomed out.
   syncIntersectionMarkersRef.current = () => {
@@ -383,6 +506,8 @@ export function GoogleMap({ intersections, selectedIntersection, selectedSignals
       mapsRef.current = maps;
       markersRef.current.clear();
       directionMarkersRef.current.clear();
+      phaseMarkersRef.current = [];
+      phaseLinesRef.current = [];
       clusterMarkersRef.current.clear();
       if (userLocationRef.current) {
         userMarkerRef.current = new maps.Marker({
@@ -422,60 +547,12 @@ export function GoogleMap({ intersections, selectedIntersection, selectedSignals
         <span aria-hidden="true">⌘</span> 방향성 테스트
       </button>
       {isDirectionTestOpen ? <DirectionalityTest shape={junctionShape} phaseIndex={testPhaseIndex} onShapeChange={chooseJunctionShape} onPhaseChange={setTestPhaseIndex} /> : null}
-      {selectedIntersection && selectedSignals.length >= 3 && !isDirectionTestOpen ? <LiveDirectionalityPanel intersectionName={selectedIntersection.name} signals={selectedSignals} /> : null}
+      {selectedIntersection && selectedSignals.length >= 3 && !isDirectionTestOpen ? <p className="map-sequence-legend">① 현재 진행 <span aria-hidden="true">→</span> 이후 진행 순서</p> : null}
       <button type="button" className="current-location-button" onClick={focusCurrentLocation} aria-label="현재 위치로 지도 이동">
         <span aria-hidden="true">◎</span> 현재 위치
       </button>
       {error ? <div className="map-error"><strong>구글 지도를 표시할 수 없습니다.</strong><span>{error}</span><code>VITE_GOOGLE_MAPS_API_KEY</code>를 설정한 뒤 서버를 다시 시작하세요.</div> : null}
     </section>
-  );
-}
-
-function LiveDirectionalityPanel({ intersectionName, signals }: { intersectionName: string; signals: readonly PedestrianSignal[] }) {
-  const timedSignals = signals.filter((signal) => signal.remainingSeconds !== null);
-  const transitionSteps = timedSignals
-    .slice()
-    .sort((left, right) => (left.remainingSeconds ?? Infinity) - (right.remainingSeconds ?? Infinity))
-    .reduce<{ remainingSeconds: number; signals: PedestrianSignal[] }[]>((steps, signal) => {
-      const remainingSeconds = signal.remainingSeconds ?? 0;
-      const previous = steps.at(-1);
-      if (previous && Math.abs(previous.remainingSeconds - remainingSeconds) < 0.2) previous.signals.push(signal);
-      else steps.push({ remainingSeconds, signals: [signal] });
-      return steps;
-    }, [])
-    .slice(0, 4);
-  const activeDirections = signals.filter((signal) => signal.state === "WALK");
-  const hasFourOrMoreDirections = signals.length >= 4;
-  const nextStateLabel = (state: SignalState) => state === "WALK" ? "정지" : state === "STOP" ? "진행" : "변경";
-
-  return (
-    <aside className="live-direction-panel" aria-label={`${intersectionName} 신호 순서`}>
-      <div className="live-direction-heading">
-        <div><p>방향별 신호 순서</p><strong>{intersectionName}</strong></div>
-        <span>{hasFourOrMoreDirections ? "사거리" : "삼거리"} 추정</span>
-      </div>
-      <p className="live-direction-summary">
-        {activeDirections.length > 0
-          ? <>현재 <strong>{activeDirections.map((signal) => directionName[signal.direction]).join(" · ")}</strong> 방향 진행</>
-          : "현재 진행 허용 방향이 없습니다."}
-      </p>
-      <div className="live-direction-diagram" aria-label="방향별 신호 상태">
-        <i className="live-road vertical" /><i className="live-road horizontal" />
-        {signals.map((signal) => {
-          return <span key={signal.direction} className={`live-direction-node ${signal.direction.toLowerCase()} ${signal.state.toLowerCase()}`}>
-            <b>{directionName[signal.direction]}</b><small>{signalDescription[signal.state]}</small>
-          </span>;
-        })}
-        <span className="live-direction-core">보행<br />신호</span>
-      </div>
-      {transitionSteps.length > 0 ? <div className="signal-order-flow" aria-label="예상 신호 전환 순서">
-        <span className="signal-order-current"><small>현재</small><b>{activeDirections.length > 0 ? activeDirections.map((signal) => directionName[signal.direction]).join(" · ") : "전체 대기"}</b></span>
-        {transitionSteps.map((step) => <span className="signal-order-step" key={step.remainingSeconds}>
-          <i aria-hidden="true">→</i><span><small>+{step.remainingSeconds.toFixed(1)}초</small><b>{step.signals.map((signal) => `${directionName[signal.direction]} ${nextStateLabel(signal.state)}`).join(" · ")}</b></span>
-        </span>)}
-      </div> : <p className="live-direction-next">신호 순서를 계산할 잔여시간 정보가 없습니다.</p>}
-      <p className="live-direction-note">화살표는 방향별 잔여시간을 시간순으로 정렬한 예상 전환 흐름입니다.</p>
-    </aside>
   );
 }
 
