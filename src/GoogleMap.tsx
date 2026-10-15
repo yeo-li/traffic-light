@@ -150,21 +150,8 @@ function phaseBadgePosition(intersection: Intersection, direction: SignalDirecti
   return offsetPosition(intersection, north / length * 46, east / length * 46);
 }
 
-function phaseArcPath(intersection: Intersection, from: SignalDirection, to: SignalDirection, arcIndex: number) {
-  const [fromNorth, fromEast] = directionOffsetMeters[from];
-  const [toNorth, toEast] = directionOffsetMeters[to];
-  const fromAngle = Math.atan2(fromEast, fromNorth);
-  const toAngle = Math.atan2(toEast, toNorth);
-  let delta = toAngle - fromAngle;
-  while (delta > Math.PI) delta -= Math.PI * 2;
-  while (delta <= -Math.PI) delta += Math.PI * 2;
-  if (Math.abs(Math.abs(delta) - Math.PI) < 0.01) delta = arcIndex % 2 === 0 ? Math.PI : -Math.PI;
-
-  const ringPoint = (angle: number) => offsetPosition(intersection, Math.cos(angle) * 42, Math.sin(angle) * 42);
-  const points = [directionalPosition(intersection, from), ringPoint(fromAngle)];
-  for (let step = 1; step <= 4; step += 1) points.push(ringPoint(fromAngle + delta * (step / 5)));
-  points.push(ringPoint(toAngle), directionalPosition(intersection, to));
-  return points;
+function phasePath(intersection: Intersection, from: SignalDirection, to: SignalDirection) {
+  return [directionalPosition(intersection, from), directionalPosition(intersection, to)];
 }
 
 function trafficLightIcon(maps: GoogleMaps, state: SignalState, compact = false, emphasized = false): MarkerIcon {
@@ -401,7 +388,7 @@ export function GoogleMap({ intersections, selectedIntersection, selectedSignals
       const from = phaseRepresentative(phase);
       const to = phaseRepresentative(nextPhase);
       phaseLinesRef.current.push(new maps.Polyline({
-        path: phaseArcPath(selectedIntersection, from.direction, to.direction, index),
+        path: phasePath(selectedIntersection, from.direction, to.direction),
         map,
         strokeColor: "#1769d1",
         strokeOpacity: 0.85,
