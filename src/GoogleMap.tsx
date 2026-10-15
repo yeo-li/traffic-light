@@ -72,16 +72,16 @@ const directionName: Record<SignalDirection, string> = {
 
 const gunjaStation = { lat: 37.5571793, lng: 127.0794927 };
 
-const directionTestPhases: Record<JunctionShape, readonly { label: string; description: string; activeArms: readonly string[] }[]> = {
+const directionTestPhases: Record<JunctionShape, readonly { label: string; nextLabel: string; activeArms: readonly string[]; nextArms: readonly string[] }[]> = {
   crossroads: [
-    { label: "① 북 ↕ 남", description: "남북으로 횡단하는 보행 신호 묶음", activeArms: ["north", "south"] },
-    { label: "② 동 ↔ 서", description: "동서로 횡단하는 보행 신호 묶음", activeArms: ["east", "west"] },
-    { label: "③ 전체 정지", description: "모든 횡단 방향 대기", activeArms: [] },
+    { label: "① 북 ↕ 남", nextLabel: "② 동 ↔ 서", activeArms: ["north", "south"], nextArms: ["east", "west"] },
+    { label: "② 동 ↔ 서", nextLabel: "③ 전체 정지", activeArms: ["east", "west"], nextArms: [] },
+    { label: "③ 전체 정지", nextLabel: "① 북 ↕ 남", activeArms: [], nextArms: ["north", "south"] },
   ],
   "three-way": [
-    { label: "① 북 ↔ 남서", description: "북쪽과 남서쪽을 연결하는 보행 신호 묶음", activeArms: ["north", "southwest"] },
-    { label: "② 북 ↔ 남동", description: "북쪽과 남동쪽을 연결하는 보행 신호 묶음", activeArms: ["north", "southeast"] },
-    { label: "③ 전체 정지", description: "모든 횡단 방향 대기", activeArms: [] },
+    { label: "① 북 ↔ 남서", nextLabel: "② 북 ↔ 남동", activeArms: ["north", "southwest"], nextArms: ["north", "southeast"] },
+    { label: "② 북 ↔ 남동", nextLabel: "③ 전체 정지", activeArms: ["north", "southeast"], nextArms: [] },
+    { label: "③ 전체 정지", nextLabel: "① 북 ↔ 남서", activeArms: [], nextArms: ["north", "southwest"] },
   ],
 };
 
@@ -439,14 +439,15 @@ function DirectionalityTest({ shape, phaseIndex, onShapeChange, onPhaseChange }:
   const phases = directionTestPhases[shape];
   const phase = phases[phaseIndex] ?? phases[0];
   const isActive = (arm: string) => phase.activeArms.includes(arm);
-  const arm = (name: string, label: string) => <span className={`junction-arm ${name} ${isActive(name) ? "active" : ""}`}><b>{label}</b><small>{isActive(name) ? "진행" : "대기"}</small></span>;
+  const isNext = (arm: string) => phase.nextArms.includes(arm);
+  const arm = (name: string, label: string) => <span className={`junction-arm ${name} ${isActive(name) ? "active" : ""} ${!isActive(name) && isNext(name) ? "next" : ""}`}><b>{label}</b><small>{isActive(name) ? "현재" : isNext(name) ? "다음" : "대기"}</small></span>;
   return (
     <aside className="direction-test-panel" aria-label="군자역 방향성 테스트">
       <div className="direction-test-heading">
         <div><p>군자역 인근</p><strong>횡단 방향성 실험</strong></div>
         <span>TEST</span>
       </div>
-      <p className="direction-test-caption">신호 API 없이, 교차로 구조와 신호 단계의 연결 방식을 검토합니다.</p>
+      <p className="direction-test-caption">신호 API 없이, 현재 보행 신호 다음에 어느 방향이 바뀌는지 검토합니다.</p>
       <div className="junction-tabs" role="tablist" aria-label="교차로 형태">
         <button type="button" className={shape === "crossroads" ? "selected" : ""} onClick={() => onShapeChange("crossroads")}>사거리</button>
         <button type="button" className={shape === "three-way" ? "selected" : ""} onClick={() => onShapeChange("three-way")}>삼거리</button>
@@ -458,8 +459,8 @@ function DirectionalityTest({ shape, phaseIndex, onShapeChange, onPhaseChange }:
       <div className="phase-picker" aria-label="신호 단계 선택">
         {phases.map((item, index) => <button key={item.label} type="button" className={index === phaseIndex ? "selected" : ""} onClick={() => onPhaseChange(index)}>{item.label}</button>)}
       </div>
-      <p className="phase-description"><strong>{phase.label}</strong> {phase.description}</p>
-      <p className="direction-test-note">초록색은 이 단계에 연결된 방향입니다. 실제 횡단보도 배치는 현장·지도 데이터로 확정합니다.</p>
+      <p className="phase-description"><strong>{phase.label}</strong><span aria-hidden="true"> → </span><strong>{phase.nextLabel}</strong> 순서로 바뀝니다.</p>
+      <p className="direction-test-note">초록은 현재 신호, 노랑은 다음 신호입니다. 실제 횡단보도 배치는 현장·지도 데이터로 확정합니다.</p>
     </aside>
   );
 }
