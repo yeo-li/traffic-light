@@ -229,7 +229,7 @@ export function App() {
   return (
     <main className={`app-shell ${isSignalPanelCollapsed ? "panel-collapsed" : ""}`}>
       <header className="top-bar">
-        <span aria-hidden="true">🚦</span><strong>건널까?</strong>
+        <span aria-hidden="true">🚦</span><strong>언제 건널까</strong>
         <p>보행 신호 참고 정보</p>
       </header>
       <GoogleMap
