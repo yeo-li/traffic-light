@@ -422,11 +422,55 @@ export function GoogleMap({ intersections, selectedIntersection, selectedSignals
         <span aria-hidden="true">⌘</span> 방향성 테스트
       </button>
       {isDirectionTestOpen ? <DirectionalityTest shape={junctionShape} phaseIndex={testPhaseIndex} onShapeChange={chooseJunctionShape} onPhaseChange={setTestPhaseIndex} /> : null}
+      {selectedIntersection && selectedSignals.length >= 3 && !isDirectionTestOpen ? <LiveDirectionalityPanel intersectionName={selectedIntersection.name} signals={selectedSignals} /> : null}
       <button type="button" className="current-location-button" onClick={focusCurrentLocation} aria-label="현재 위치로 지도 이동">
         <span aria-hidden="true">◎</span> 현재 위치
       </button>
       {error ? <div className="map-error"><strong>구글 지도를 표시할 수 없습니다.</strong><span>{error}</span><code>VITE_GOOGLE_MAPS_API_KEY</code>를 설정한 뒤 서버를 다시 시작하세요.</div> : null}
     </section>
+  );
+}
+
+function LiveDirectionalityPanel({ intersectionName, signals }: { intersectionName: string; signals: readonly PedestrianSignal[] }) {
+  const timedSignals = signals.filter((signal) => signal.remainingSeconds !== null);
+  const nextRemaining = timedSignals.reduce<number | null>((earliest, signal) => (
+    earliest === null || (signal.remainingSeconds ?? Infinity) < earliest ? signal.remainingSeconds : earliest
+  ), null);
+  // The first residual timer to end is the next phase change observed from the API.
+  const nextDirections = new Set(timedSignals
+    .filter((signal) => nextRemaining !== null && Math.abs((signal.remainingSeconds ?? 0) - nextRemaining) < 0.2)
+    .map((signal) => signal.direction));
+  const activeDirections = signals.filter((signal) => signal.state === "WALK");
+  const hasFourOrMoreDirections = signals.length >= 4;
+
+  return (
+    <aside className="live-direction-panel" aria-label={`${intersectionName} 신호 순서`}>
+      <div className="live-direction-heading">
+        <div><p>방향별 신호 순서</p><strong>{intersectionName}</strong></div>
+        <span>{hasFourOrMoreDirections ? "사거리" : "삼거리"} 추정</span>
+      </div>
+      <p className="live-direction-summary">
+        {activeDirections.length > 0
+          ? <>현재 <strong>{activeDirections.map((signal) => directionName[signal.direction]).join(" · ")}</strong> 방향 진행</>
+          : "현재 진행 허용 방향이 없습니다."}
+      </p>
+      <div className="live-direction-diagram" aria-label="방향별 신호 상태">
+        <i className="live-road vertical" /><i className="live-road horizontal" />
+        {signals.map((signal) => {
+          const isNext = nextDirections.has(signal.direction);
+          return <span key={signal.direction} className={`live-direction-node ${signal.direction.toLowerCase()} ${signal.state.toLowerCase()} ${isNext ? "next" : ""}`}>
+            <b>{directionName[signal.direction]}</b><small>{isNext ? "다음 전환" : signalDescription[signal.state]}</small>
+          </span>;
+        })}
+        <span className="live-direction-core">보행<br />신호</span>
+      </div>
+      <p className="live-direction-next">
+        {nextDirections.size > 0
+          ? <>다음 전환 <strong>{[...nextDirections].map((direction) => directionName[direction]).join(" · ")}</strong>{nextRemaining === null ? "" : ` · 약 ${nextRemaining.toFixed(1)}초`}</>
+          : "다음 전환 시각 정보가 없습니다."}
+      </p>
+      <p className="live-direction-note">초록은 현재 진행, 노랑 테두리는 API 잔여시간상 가장 먼저 바뀔 방향입니다.</p>
+    </aside>
   );
 }
 
