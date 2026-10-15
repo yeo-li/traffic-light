@@ -1,14 +1,19 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fetchIntersections, fetchSignals, SignalApiError } from "./api";
 import { GoogleMap } from "./GoogleMap";
 import { SignalPanel } from "./SignalPanel";
-import type { Intersection, MapLocation, SignalResponse, SignalState } from "./types";
+import type { Intersection, MapLocation, SignalDirection, SignalResponse, SignalState } from "./types";
 
-function getMapSignalState(data: SignalResponse | null, isTransitionPending: boolean): SignalState {
-  if (isTransitionPending) return "UNKNOWN";
+function getMapSignalState(data: SignalResponse | null): SignalState {
   if (!data || data.signals.length === 0) return "UNKNOWN";
   if (data.signals.some((signal) => signal.state === "WALK")) return "WALK";
   if (data.signals.every((signal) => signal.state === "STOP")) return "STOP";
+  return "UNKNOWN";
+}
+
+function predictedNextState(state: SignalState): SignalState {
+  if (state === "WALK") return "STOP";
+  if (state === "STOP") return "WALK";
   return "UNKNOWN";
 }
 
@@ -44,12 +49,14 @@ export function App() {
   const [signalData, setSignalData] = useState<SignalResponse | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [isTransitionPending, setIsTransitionPending] = useState(false);
   const [hasTimingResolutionFailed, setHasTimingResolutionFailed] = useState(false);
   const [isSignalPanelCollapsed, setIsSignalPanelCollapsed] = useState(false);
+  const [predictedSignalStates, setPredictedSignalStates] = useState<Partial<Record<SignalDirection, SignalState>>>({});
+  const [predictionTick, setPredictionTick] = useState(0);
   const abortRef = useRef<AbortController | null>(null);
   const mapAbortRef = useRef<AbortController | null>(null);
   const hasAutoSelectedNearestRef = useRef(false);
+  const completedPredictionKeysRef = useRef(new Set<string>());
 
   const refresh = useCallback(async () => {
     if (!selectedIntersection) return;
@@ -60,6 +67,9 @@ export function App() {
     setError(null);
     try {
       const response = await fetchSignals(selectedIntersection, controller.signal);
+      completedPredictionKeysRef.current.clear();
+      setPredictedSignalStates({});
+      setPredictionTick((tick) => tick + 1);
       setSignalData(response);
     } catch (caught) {
       const message = toUserMessage(caught);
@@ -84,8 +94,9 @@ export function App() {
       abortRef.current = null;
       setSignalData(null);
       setError(null);
-      setIsTransitionPending(false);
       setHasTimingResolutionFailed(false);
+      completedPredictionKeysRef.current.clear();
+      setPredictedSignalStates({});
       setSelectedIntersection(intersection);
     }
   }, [selectedIntersection?.id]);
@@ -101,7 +112,19 @@ export function App() {
       { enableHighAccuracy: true, timeout: 10_000, maximumAge: 0 },
     );
   }, []);
-  const mapSignalState = getMapSignalState(signalData, isTransitionPending);
+  const displayedSignalData = useMemo(() => {
+    if (!signalData || Object.keys(predictedSignalStates).length === 0) return signalData;
+    return {
+      ...signalData,
+      signals: signalData.signals.map((signal) => {
+        const predictedState = predictedSignalStates[signal.direction];
+        return predictedState === undefined
+          ? signal
+          : { ...signal, state: predictedState, remainingSeconds: null, rawRemainingValue: null };
+      }),
+    };
+  }, [predictedSignalStates, signalData]);
+  const mapSignalState = getMapSignalState(displayedSignalData);
 
   useEffect(() => {
     if (!selectedIntersection) return;
@@ -167,23 +190,41 @@ export function App() {
         (signal) => signal.rawRemainingValue !== null && signal.remainingSeconds === null,
       );
       setHasTimingResolutionFailed(hasUnusableTiming);
-      setIsTransitionPending(false);
       return;
     }
     setHasTimingResolutionFailed(false);
 
     const now = Date.now();
-    const isExpired = earliestExpiry <= now;
-    setIsTransitionPending(isExpired);
-    if (isExpired) return;
-    // The countdown reaches its expected transition locally. A separate five-minute
-    // correction (or an explicit refresh) obtains the next authoritative value.
-    const delay = earliestExpiry - now;
+    const newlyExpired = signalData.signals.filter((signal) => {
+      if (signal.remainingSeconds === null) return false;
+      const key = `${signal.direction}:${sourceTime + signal.remainingSeconds * 1_000}`;
+      return sourceTime + signal.remainingSeconds * 1_000 <= now && !completedPredictionKeysRef.current.has(key);
+    });
+    if (newlyExpired.length > 0) {
+      for (const signal of newlyExpired) {
+        completedPredictionKeysRef.current.add(`${signal.direction}:${sourceTime + (signal.remainingSeconds ?? 0) * 1_000}`);
+      }
+      setPredictedSignalStates((states) => ({
+        ...states,
+        ...Object.fromEntries(newlyExpired.map((signal) => [signal.direction, predictedNextState(signal.state)])),
+      }));
+      setPredictionTick((tick) => tick + 1);
+      return;
+    }
+    const nextExpiry = signalData.signals.reduce<number | null>((nearest, signal) => {
+      if (signal.remainingSeconds === null) return nearest;
+      const expiry = sourceTime + signal.remainingSeconds * 1_000;
+      const key = `${signal.direction}:${expiry}`;
+      if (completedPredictionKeysRef.current.has(key)) return nearest;
+      return nearest === null ? expiry : Math.min(nearest, expiry);
+    }, null);
+    if (nextExpiry === null) return;
+    const delay = Math.max(0, nextExpiry - now);
     const timer = window.setTimeout(() => {
-      setIsTransitionPending(true);
+      setPredictionTick((tick) => tick + 1);
     }, delay);
     return () => window.clearTimeout(timer);
-  }, [isLoading, signalData]);
+  }, [isLoading, predictionTick, signalData]);
 
   return (
     <main className={`app-shell ${isSignalPanelCollapsed ? "panel-collapsed" : ""}`}>
@@ -194,9 +235,8 @@ export function App() {
       <GoogleMap
         intersections={intersections}
         selectedIntersection={selectedIntersection}
-        selectedSignals={signalData?.signals ?? []}
+        selectedSignals={displayedSignalData?.signals ?? []}
         signalState={mapSignalState}
-        isTransitionPending={isTransitionPending}
         userLocation={userLocation}
         onMarkerClick={openSignalPanel}
         onLocate={requestUserLocation}
@@ -204,9 +244,9 @@ export function App() {
       {mapError ? <p className="map-load-error">{mapError}</p> : null}
       <SignalPanel
         intersectionName={selectedIntersection?.name ?? "교차로를 선택하세요"}
-        data={signalData}
+        data={displayedSignalData}
         isLoading={isLoading}
-        isTransitionPending={isTransitionPending}
+        predictedDirections={Object.keys(predictedSignalStates) as SignalDirection[]}
         hasTimingResolutionFailed={hasTimingResolutionFailed}
         error={error}
         onRefresh={manualRefresh}

@@ -53,7 +53,6 @@ interface GoogleMapProps {
   selectedIntersection: Intersection | null;
   selectedSignals: readonly PedestrianSignal[];
   signalState: SignalState;
-  isTransitionPending: boolean;
   userLocation: MapLocation | null;
   onMarkerClick: (intersection: Intersection) => void;
   onLocate: () => void;
@@ -133,7 +132,7 @@ function userLocationIcon(): MarkerIcon {
   return { url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}` };
 }
 
-export function GoogleMap({ intersections, selectedIntersection, selectedSignals, signalState, isTransitionPending, userLocation, onMarkerClick, onLocate }: GoogleMapProps) {
+export function GoogleMap({ intersections, selectedIntersection, selectedSignals, signalState, userLocation, onMarkerClick, onLocate }: GoogleMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const markersRef = useRef(new Map<string, GoogleMarker>());
   const directionMarkersRef = useRef(new Map<SignalDirection, GoogleMarker>());
@@ -229,7 +228,7 @@ export function GoogleMap({ intersections, selectedIntersection, selectedSignals
 
     for (const signal of selectedSignals) {
       const position = directionalPosition(selectedIntersection, signal.direction);
-      const displayedState = isTransitionPending ? "UNKNOWN" : signal.state;
+      const displayedState = signal.state;
       const title = `${selectedIntersection.name} ${directionName[signal.direction]}: ${signalDescription[displayedState]}`;
       const isEmphasized = signal.direction === emphasizedDirection;
       const existing = directionMarkersRef.current.get(signal.direction);
@@ -254,7 +253,7 @@ export function GoogleMap({ intersections, selectedIntersection, selectedSignals
         if (currentSelection) onMarkerClickRef.current(currentSelection);
       });
     }
-  }, [isMapReady, isTransitionPending, selectedDirection, selectedIntersection, selectedSignals]);
+  }, [isMapReady, selectedDirection, selectedIntersection, selectedSignals]);
 
   // Google Maps does not provide clustering for legacy Marker instances by default.
   // This lightweight grid clusters nearby intersections only while zoomed out.

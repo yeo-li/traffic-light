@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { PedestrianSignal, SignalResponse } from "./types";
+import type { PedestrianSignal, SignalDirection, SignalResponse } from "./types";
 
 const directionNames: Record<PedestrianSignal["direction"], string> = {
   N: "북쪽", NE: "북동 방향", E: "동쪽", SE: "남동 방향",
@@ -19,13 +19,14 @@ function formatDateTime(timestamp: string) {
     : new Intl.DateTimeFormat("ko-KR", { hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(date);
 }
 
-function Countdown({ signal, sourceTimestamp }: { signal: PedestrianSignal; sourceTimestamp: string | null }) {
+function Countdown({ signal, sourceTimestamp, isPredicted }: { signal: PedestrianSignal; sourceTimestamp: string | null; isPredicted: boolean }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 100);
     return () => window.clearInterval(timer);
   }, []);
 
+  if (isPredicted) return <p className="remaining">잔여시간: 추정 중</p>;
   if (signal.remainingSeconds === null) {
     return <p className="remaining">잔여시간: {signal.rawRemainingValue === null ? "정보 없음" : "확인 불가"}</p>;
   }
@@ -36,7 +37,7 @@ function Countdown({ signal, sourceTimestamp }: { signal: PedestrianSignal; sour
   return <p className="remaining">잔여시간: <strong>{seconds.toFixed(1)}초</strong></p>;
 }
 
-function SignalCard({ signal, sourceTimestamp }: { signal: PedestrianSignal; sourceTimestamp: string | null }) {
+function SignalCard({ signal, sourceTimestamp, isPredicted }: { signal: PedestrianSignal; sourceTimestamp: string | null; isPredicted: boolean }) {
   const knownState = stateInfo[signal.state];
   const info = signal.state === "UNKNOWN" && signal.rawState !== null
     ? { ...knownState, label: "확인되지 않은 상태" }
@@ -45,11 +46,11 @@ function SignalCard({ signal, sourceTimestamp }: { signal: PedestrianSignal; sou
     <article className="signal-card">
       <p className="direction">{directionNames[signal.direction]}</p>
       <p className={`signal-state ${info.className}`}>
-        <span aria-hidden="true">{info.icon}</span> {info.label}
+        <span aria-hidden="true">{info.icon}</span> {isPredicted ? `예상 ${info.label}` : info.label}
       </p>
       {signal.state === "UNKNOWN" && signal.rawState !== null ? <p className="raw-state">원본 상태: {signal.rawState}</p> : null}
-      <Countdown signal={signal} sourceTimestamp={sourceTimestamp} />
-      <p className="raw-remaining">원본값: {signal.rawRemainingValue ?? "정보 없음"}</p>
+      <Countdown signal={signal} sourceTimestamp={sourceTimestamp} isPredicted={isPredicted} />
+      {!isPredicted ? <p className="raw-remaining">원본값: {signal.rawRemainingValue ?? "정보 없음"}</p> : null}
     </article>
   );
 }
@@ -58,7 +59,7 @@ interface SignalPanelProps {
   intersectionName: string;
   data: SignalResponse | null;
   isLoading: boolean;
-  isTransitionPending: boolean;
+  predictedDirections: readonly SignalDirection[];
   hasTimingResolutionFailed: boolean;
   error: string | null;
   onRefresh: () => void;
@@ -67,15 +68,13 @@ interface SignalPanelProps {
   onCollapse: () => void;
 }
 
-export function SignalPanel({ intersectionName, data, isLoading, isTransitionPending, hasTimingResolutionFailed, error, onRefresh, hasSelection, isCollapsed, onCollapse }: SignalPanelProps) {
+export function SignalPanel({ intersectionName, data, isLoading, predictedDirections, hasTimingResolutionFailed, error, onRefresh, hasSelection, isCollapsed, onCollapse }: SignalPanelProps) {
   const statusText = !hasSelection
     ? "지도에서 신호등을 선택하면 실시간 보행 신호를 확인합니다."
     : isLoading
     ? "신호정보를 불러오는 중입니다."
     : error
       ? error
-      : isTransitionPending
-        ? "예상 신호 전환 시점입니다. 실제 횡단 전에는 현장 신호등을 확인하세요."
       : hasTimingResolutionFailed
         ? "잔여시간 정보를 확인하지 못했습니다. 현장 신호등을 우선 확인하세요."
       : data?.signals.length === 0
@@ -104,7 +103,7 @@ export function SignalPanel({ intersectionName, data, isLoading, isTransitionPen
 
       <h2>보행 신호</h2>
       {statusText ? <p className={`notice ${error ? "error" : ""}`}>{statusText}</p> : null}
-      {data && data.signals.length > 0 && !isTransitionPending ? <div className="signal-list">{data.signals.map((signal) => <SignalCard key={signal.direction} signal={signal} sourceTimestamp={data.sourceTimestamp} />)}</div> : null}
+      {data && data.signals.length > 0 ? <div className="signal-list">{data.signals.map((signal) => <SignalCard key={signal.direction} signal={signal} sourceTimestamp={data.sourceTimestamp} isPredicted={predictedDirections.includes(signal.direction)} />)}</div> : null}
 
       <div className="metadata">
         <p>마지막 갱신 <strong>{data ? formatDateTime(data.fetchedAt) : "아직 없음"}</strong></p>
