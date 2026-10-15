@@ -49,7 +49,6 @@ export function App() {
   const [isSignalPanelCollapsed, setIsSignalPanelCollapsed] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const mapAbortRef = useRef<AbortController | null>(null);
-  const unusableTimingRetriesRef = useRef(0);
   const hasAutoSelectedNearestRef = useRef(false);
 
   const refresh = useCallback(async () => {
@@ -87,12 +86,10 @@ export function App() {
       setError(null);
       setIsTransitionPending(false);
       setHasTimingResolutionFailed(false);
-      unusableTimingRetriesRef.current = 0;
       setSelectedIntersection(intersection);
     }
   }, [selectedIntersection?.id]);
   const manualRefresh = useCallback(() => {
-    unusableTimingRetriesRef.current = 0;
     setHasTimingResolutionFailed(false);
     void refresh();
   }, [refresh]);
@@ -110,6 +107,19 @@ export function App() {
     if (!selectedIntersection) return;
     void refresh();
     return () => abortRef.current?.abort();
+  }, [refresh, selectedIntersection]);
+
+  useEffect(() => {
+    if (!selectedIntersection) return;
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") void refresh();
+    };
+    const correctionTimer = window.setInterval(refreshWhenVisible, 5 * 60 * 1_000);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    return () => {
+      window.clearInterval(correctionTimer);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
   }, [refresh, selectedIntersection]);
 
   useEffect(() => {
@@ -156,39 +166,24 @@ export function App() {
       const hasUnusableTiming = signalData.signals.some(
         (signal) => signal.rawRemainingValue !== null && signal.remainingSeconds === null,
       );
-      if (!hasUnusableTiming) return;
-      if (unusableTimingRetriesRef.current >= 5) {
-        setHasTimingResolutionFailed(true);
-        return;
-      }
-      setHasTimingResolutionFailed(false);
-      const timer = window.setTimeout(() => {
-        unusableTimingRetriesRef.current += 1;
-        void refresh();
-      }, 2_000);
-      return () => window.clearTimeout(timer);
+      setHasTimingResolutionFailed(hasUnusableTiming);
+      setIsTransitionPending(false);
+      return;
     }
-    unusableTimingRetriesRef.current = 0;
     setHasTimingResolutionFailed(false);
 
     const now = Date.now();
     const isExpired = earliestExpiry <= now;
     setIsTransitionPending(isExpired);
-
-    // Refresh only after the predicted transition. If upstream data is still old after zero,
-    // poll at its observed update cadence until a fresh phase arrives.
-    const retryIntervalMs = 1_200;
-    const cacheSafetyDelayMs = 1_100;
-    const fetchedTime = Date.parse(signalData.fetchedAt);
-    const cacheReadyAt = Number.isNaN(fetchedTime) ? 0 : fetchedTime + cacheSafetyDelayMs;
-    const nextCheckAt = isExpired ? now + retryIntervalMs : earliestExpiry;
-    const delay = Math.max(0, nextCheckAt, cacheReadyAt) - now;
+    if (isExpired) return;
+    // The countdown reaches its expected transition locally. A separate five-minute
+    // correction (or an explicit refresh) obtains the next authoritative value.
+    const delay = earliestExpiry - now;
     const timer = window.setTimeout(() => {
-      if (Date.now() >= earliestExpiry) setIsTransitionPending(true);
-      void refresh();
+      setIsTransitionPending(true);
     }, delay);
     return () => window.clearTimeout(timer);
-  }, [isLoading, refresh, signalData]);
+  }, [isLoading, signalData]);
 
   return (
     <main className={`app-shell ${isSignalPanelCollapsed ? "panel-collapsed" : ""}`}>

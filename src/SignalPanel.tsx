@@ -75,7 +75,7 @@ export function SignalPanel({ intersectionName, data, isLoading, isTransitionPen
     : error
       ? error
       : isTransitionPending
-        ? "신호 전환을 확인 중입니다. 현장 신호등을 우선 확인하세요."
+        ? "예상 신호 전환 시점입니다. 실제 횡단 전에는 현장 신호등을 확인하세요."
       : hasTimingResolutionFailed
         ? "잔여시간 정보를 확인하지 못했습니다. 현장 신호등을 우선 확인하세요."
       : data?.signals.length === 0
@@ -109,7 +109,7 @@ export function SignalPanel({ intersectionName, data, isLoading, isTransitionPen
       <div className="metadata">
         <p>마지막 갱신 <strong>{data ? formatDateTime(data.fetchedAt) : "아직 없음"}</strong></p>
         {data?.sourceTimestamp ? <p>원본 수신 시각 <strong>{formatDateTime(data.sourceTimestamp)}</strong></p> : null}
-        {data?.signals.some((signal) => signal.remainingSeconds !== null) ? <p>신호 전환 시 자동으로 최신 정보를 확인합니다.</p> : null}
+        {data?.signals.some((signal) => signal.remainingSeconds !== null) ? <p>앱 복귀·수동 새로고침 또는 5분마다 최신 정보를 보정합니다.</p> : null}
       </div>
       <p className="safety-notice">실제 횡단 시에는 현장 신호등을 확인하세요.</p>
     </section>
