@@ -140,10 +140,6 @@ function buildSignalPhases(signals: readonly PedestrianSignal[]): SignalPhase[] 
   return phases.slice(0, 4);
 }
 
-function phaseRepresentative(phase: SignalPhase) {
-  return phase.signals[0];
-}
-
 function phaseBadgePosition(intersection: Intersection, direction: SignalDirection) {
   const [north, east] = directionOffsetMeters[direction];
   const length = Math.hypot(north, east);
@@ -383,18 +379,22 @@ export function GoogleMap({ intersections, selectedIntersection, selectedSignals
           icon: phaseBadgeIcon(maps, index + 1),
         }));
       }
-      const nextPhase = phases[index + 1];
-      if (!nextPhase) return;
-      const from = phaseRepresentative(phase);
-      const to = phaseRepresentative(nextPhase);
-      phaseLinesRef.current.push(new maps.Polyline({
-        path: phasePath(selectedIntersection, from.direction, to.direction),
-        map,
-        strokeColor: "#1769d1",
-        strokeOpacity: 0.85,
-        strokeWeight: 4,
-        icons: [{ icon: { path: maps.SymbolPath.FORWARD_CLOSED_ARROW, scale: 3.5, strokeColor: "#1769d1", fillColor: "#1769d1", fillOpacity: 1 }, offset: "66%" }],
-      }));
+      // Connect every visible signal node to the following phase, including the final
+      // phase back to the current one. This forms a readable cycle on the map while
+      // preserving ties: directions with the same number change together.
+      const nextPhase = phases[(index + 1) % phases.length];
+      for (const from of phase.signals) {
+        for (const to of nextPhase.signals) {
+          phaseLinesRef.current.push(new maps.Polyline({
+            path: phasePath(selectedIntersection, from.direction, to.direction),
+            map,
+            strokeColor: "#1769d1",
+            strokeOpacity: 0.85,
+            strokeWeight: 4,
+            icons: [{ icon: { path: maps.SymbolPath.FORWARD_CLOSED_ARROW, scale: 3.5, strokeColor: "#1769d1", fillColor: "#1769d1", fillOpacity: 1 }, offset: "66%" }],
+          }));
+        }
+      }
     });
 
     return clearPhaseOverlays;
@@ -534,7 +534,7 @@ export function GoogleMap({ intersections, selectedIntersection, selectedSignals
         <span aria-hidden="true">⌘</span> 방향성 테스트
       </button>
       {isDirectionTestOpen ? <DirectionalityTest shape={junctionShape} phaseIndex={testPhaseIndex} onShapeChange={chooseJunctionShape} onPhaseChange={setTestPhaseIndex} /> : null}
-      {selectedIntersection && selectedSignals.length >= 3 && !isDirectionTestOpen ? <p className="map-sequence-legend">① 현재 진행 <span aria-hidden="true">→</span> 이후 진행 순서</p> : null}
+      {selectedIntersection && selectedSignals.length >= 3 && !isDirectionTestOpen ? <p className="map-sequence-legend">① 현재 <span aria-hidden="true">→</span> ② <span aria-hidden="true">→</span> ③ <span aria-hidden="true">→</span> ①</p> : null}
       <button type="button" className="current-location-button" onClick={focusCurrentLocation} aria-label="현재 위치로 지도 이동">
         <span aria-hidden="true">◎</span> 현재 위치
       </button>
